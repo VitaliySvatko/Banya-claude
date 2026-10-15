@@ -126,12 +126,17 @@ for(var i=0;i<N;i++){
   var o={i:i,m:d.m,g:d.g,w:d.w,s:d.s,l:d.l,n:d.n,vol:d.vol,v:v,c:c,ctx:d.g==='ctx',ex:d.k==='x',st:d.st,rank:0};
   M.push(o); if(!o.ex)frameCount++;
 }
-// порядок сборки
-var order=M.filter(function(o){return !o.ex;}).sort(function(a,b){
+// порядок сборки: все элементы по этапам — от свай до отделки и террасы
+var order=M.slice().sort(function(a,b){
+  if(a.st!==b.st)return a.st-b.st;
   var ga=GORDER.indexOf(a.g),gb=GORDER.indexOf(b.g); if(ga!==gb)return ga-gb;
   if(Math.abs(a.c[1]-b.c[1])>0.02)return a.c[1]-b.c[1];
   if(Math.abs(a.c[0]-b.c[0])>0.02)return a.c[0]-b.c[0]; return a.c[2]-b.c[2];});
 order.forEach(function(o,k){o.rank=k;});
+var stepCount=order.length;
+// разнесение отделки и прочих слоёв: множитель «наружу» и подъём (null — по высоте элемента)
+var EXOUT={'св':0,'сети':0,'наст':0,'наст2':0,'вод':0,'эл':0,'обш_в':0.4,'утепл':1.4,'окна':1.6,'обш_н':2.0,'пок':0.8,'тер':2.2};
+var EXLIFT={'св':0,'сети':0,'наст':1.1,'наст2':3.1,'пок':6.2,'тер':0};
 // векторы разнесения
 var cen={}; var cnt={};
 M.forEach(function(o){var key=o.g+'|'+o.w; if(!cen[key]){cen[key]=[0,0,0];cnt[key]=0;} cen[key][0]+=o.c[0];cen[key][1]+=o.c[1];cen[key][2]+=o.c[2];cnt[key]++;});
@@ -140,9 +145,14 @@ M.forEach(function(o){
   var out=[0,0],key=o.g+'|'+o.w;
   if(o.w==='S')out=[0,1]; else if(o.w==='N')out=[0,-1]; else if(o.w==='W')out=[-1,0]; else if(o.w==='E')out=[1,0];
   else if(o.g==='кол')out=[o.c[0]<0?-1:1,0]; else if(o.g==='фр')out=[0,o.c[2]>0?1:-1];
-  var L=LAYER[o.g]; if(o.ex){L=0;out=[0,0];}
+  var L=LAYER[o.g];
+  if(o.ex){
+    var nx=o.c[0]/2.5,nz=o.c[2]/2,k=EXOUT[o.g]||0;
+    out=Math.abs(nx)>Math.abs(nz)?[(nx<0?-1:1)*k,0]:[0,(nz<0?-1:1)*k];
+    L=(o.g in EXLIFT)?EXLIFT[o.g]:Math.max(0,Math.min(5,o.c[1]*1.1));
+  }
   o.exL=[out[0]*0.9,L*0.85,out[1]*0.9];
-  var cc=cen[key]; o.exB=o.ex?[0,0,0]:[(o.c[0]-cc[0])*0.55,(o.c[1]-cc[1])*0.55,(o.c[2]-cc[2])*0.55];
+  var cc=cen[key]; o.exB=o.ctx?[0,0,0]:[(o.c[0]-cc[0])*0.55,(o.c[1]-cc[1])*0.55,(o.c[2]-cc[2])*0.55];
 });
 var marks={}; M.forEach(function(o){if(o.ex)return; if(!marks[o.m])marks[o.m]={m:o.m,n:o.n,c:0,vol:0}; marks[o.m].c++; marks[o.m].vol+=o.vol;});
 var markList=Object.keys(marks).map(function(k){return marks[k];});
@@ -152,7 +162,7 @@ var sameCount={}; M.forEach(function(o){var k=o.m+'|'+o.s; sameCount[k]=(sameCou
 /* ---------- состояние ---------- */
 var S={explode:0,expT:0,mode:'layers',color:'mark',edges:true,grid:true,ctx:false,auto:false,
   groups:{},marks:{},hidden:{},sel:-1,hm:null,ghost:0.12,clip:{on:false,axis:'y',pos:8,inv:false},
-  step:frameCount,playing:false,speed:1,fov:40,flash:-1,flashT:0};
+  step:stepCount,playing:false,speed:1,fov:40,flash:-1,flashT:0};
 GORDER.forEach(function(g){S.groups[g]=(FRAMEG.indexOf(g)>=0);});
 S.stage=0;S.stageOnly=false;S.stageDim=false;
 markList.forEach(function(m){S.marks[m.m]=true;});
@@ -232,7 +242,7 @@ function baseColor(o){
 function isVisible(o){
   if(S.hidden[o.i])return false;
   if(S.stage>0){ if(S.stageOnly?o.st!==S.stage:o.st>S.stage)return false; if(!o.ex&&!S.marks[o.m])return false; return true; }
-  if(!S.groups[o.g])return false; if(!o.ex&&!S.marks[o.m])return false; if(!o.ex&&o.rank>=S.step)return false; return true;}
+  if(!S.groups[o.g])return false; if(!o.ex&&!S.marks[o.m])return false; if(o.rank>=S.step)return false; return true;}
 function focusActive(){return S.sel>=0||!!S.hm||(S.stage>0&&S.stageDim);}
 function isFocus(o){ if(S.sel>=0)return o.i===S.sel; if(S.hm)return o.m===S.hm; if(S.stage>0&&S.stageDim)return o.st===S.stage; return true;}
 
@@ -372,7 +382,7 @@ function doSelect(i){S.sel=i; if(i>=0){S.hm=null;} renderBoard(); if(i>=0)toast(
 var presets={iso:[0.78,0.5,15,[0,3.2,0]],south:[0,0.1,16,[0,3.4,0]],north:[Math.PI,0.1,16,[0,3.4,0]],east:[Math.PI/2,0.1,16,[0,3.4,0]],west:[-Math.PI/2,0.1,16,[0,3.4,0]],top:[0,1.5,17,[0,2,0]]};
 function goPreset(k){var p=presets[k];setView(p[0],p[1],p[2],p[3]);}
 function setExplode(v,animate){S.expT=v;if(!animate)S.explode=v;syncUI();}
-function showAll(){GORDER.forEach(function(g){S.groups[g]=(FRAMEG.indexOf(g)>=0);});S.ctx=false;markList.forEach(function(m){S.marks[m.m]=true;});S.hidden={};S.sel=-1;S.hm=null;S.step=frameCount;S.stage=0;S.stageOnly=false;S.clip.on=false;syncUI();renderAll();}
+function showAll(){GORDER.forEach(function(g){S.groups[g]=(FRAMEG.indexOf(g)>=0);});S.ctx=false;markList.forEach(function(m){S.marks[m.m]=true;});S.hidden={};S.sel=-1;S.hm=null;S.step=stepCount;S.stage=0;S.stageOnly=false;S.clip.on=false;syncUI();renderAll();}
 
 /* ---------- панель ---------- */
 var tabs=[['view','Вид'],['stage','Этапы'],['expl','Разбор'],['layers','Слои'],['marks','Марки'],['board','Доска'],['cut','Срез']];
@@ -460,14 +470,16 @@ segm(sE,[['layers','Слоями'],['boards','По доскам']],function(){re
 slider(sE,'Расстояние','exp',0,100,1,function(){return S.expT*100;},function(v){S.expT=v/100;S.explode=v/100;},function(v){return Math.round(v)+'%';});
 var g3=h('div','grid2');g3.style.marginTop='8px';btn(g3,'Разобрать',function(){setExplode(1,true);},'p');btn(g3,'Собрать',function(){setExplode(0,true);});sE.appendChild(g3);
 sE.appendChild(h('h3',null,'Сборка по шагам'));
-slider(sE,'Показано досок','step',0,frameCount,1,function(){return S.step;},function(v){S.step=Math.round(v);S.playing=false;syncUI();stepInfo();},function(v){return Math.round(v)+' из '+frameCount;});
+slider(sE,'Показано элементов','step',0,stepCount,1,function(){return S.step;},function(v){S.step=Math.round(v);S.playing=false;syncUI();stepInfo();},function(v){return Math.round(v)+' из '+stepCount;});
 var g4=h('div','grid');g4.style.marginTop='8px';
-var bPlay=btn(g4,'▶ Сборка',function(){if(S.step>=frameCount)S.step=0;S.playing=!S.playing;syncUI();},'p');
-btn(g4,'−10',function(){S.step=Math.max(0,S.step-10);S.playing=false;syncUI();stepInfo();});btn(g4,'+10',function(){S.step=Math.min(frameCount,S.step+10);S.playing=false;syncUI();stepInfo();});
+// сборка целиком: все слои, включая отделку
+function startBuild(){GORDER.forEach(function(g){S.groups[g]=true;});S.ctx=true;S.stage=0;S.stageOnly=false;S.clip.on=false;S.sel=-1;S.hm=null;S.step=0;S.stepF=null;S.playing=true;syncUI();}
+var bPlay=btn(g4,'▶ Сборка',function(){if(S.playing){S.playing=false;syncUI();}else if(S.step>=stepCount||S.stage>0)startBuild();else{S.playing=true;syncUI();}},'p');
+btn(g4,'−10',function(){S.step=Math.max(0,S.step-10);S.playing=false;syncUI();stepInfo();});btn(g4,'+10',function(){S.step=Math.min(stepCount,S.step+10);S.playing=false;syncUI();stepInfo();});
 sE.appendChild(g4);
 var g5=h('div','grid');g5.style.marginTop='6px';[1,2,4].forEach(function(k){btn(g5,'×'+k,function(){S.speed=k;syncUI();});});sE.appendChild(g5);
 var stepI=h('div','card');stepI.id='stepInfo';sE.appendChild(stepI);
-function stepInfo(){var o=order[Math.max(0,Math.min(frameCount-1,S.step-1))];stepI.innerHTML=S.step>0?'<div class="t">Шаг '+S.step+' из '+frameCount+'</div><div>'+o.n+' · '+o.m+' · '+o.s+'</div><div class="muted">'+(GN[o.g]||'')+'</div>':'<div class="t">Пустое основание</div><div class="muted">Двигайте ползунок или нажмите «Сборка».</div>';}
+function stepInfo(){var o=order[Math.max(0,Math.min(stepCount-1,S.step-1))];stepI.innerHTML=S.step>0?'<div class="t">Шаг '+S.step+' из '+stepCount+' · этап '+o.st+'. '+STAGES[o.st-1].short+'</div><div>'+o.n+' · '+o.m+' · '+o.s+'</div><div class="muted">'+(GN[o.g]||'')+'</div>':'<div class="t">Пустое основание</div><div class="muted">Двигайте ползунок или нажмите «Сборка».</div>';}
 
 // --- Слои
 var sL=sec('layers');
@@ -513,7 +525,7 @@ function renderBoard(){
     card.innerHTML='<div class="t"><span class="sw" style="background:'+(o.ctx?(MARKCOL[o.m]||'#9aa3ab'):(MARKCOL[o.m]||PARTCOL[o.g]||BASECOL))+'"></span>'+o.n+' <small class="muted">'+o.m+'</small></div><dl>'
      +'<dt>Сечение</dt><dd>'+o.s+'</dd><dt>Длина</dt><dd>'+o.l+' мм</dd>'+(o.ex?'':'<dt>Объём</dt><dd>'+(o.vol*1000).toFixed(2)+' дм³</dd>')
      +'<dt>Часть</dt><dd>'+GN[o.g]+(o.w?' · '+WALLN[o.w]:'')+'</dd>'
-     +'<dt>Центр</dt><dd>X '+X+', Y '+Y+', высота '+Z+' мм</dd>'+(o.ex?('<dt>Этап сборки</dt><dd>'+o.st+'. '+STAGES[o.st-1].short+'</dd>'):'<dt>Этап сборки</dt><dd>'+o.st+'. '+STAGES[o.st-1].short+'</dd><dt>Таких в проекте</dt><dd>'+cnt+' шт</dd><dt>Порядок сборки</dt><dd>№ '+(o.rank+1)+' из '+frameCount+'</dd>')+'</dl>';
+     +'<dt>Центр</dt><dd>X '+X+', Y '+Y+', высота '+Z+' мм</dd>'+(o.ex?('<dt>Этап сборки</dt><dd>'+o.st+'. '+STAGES[o.st-1].short+'</dd>'):'<dt>Этап сборки</dt><dd>'+o.st+'. '+STAGES[o.st-1].short+'</dd><dt>Таких в проекте</dt><dd>'+cnt+' шт</dd><dt>Порядок сборки</dt><dd>№ '+(o.rank+1)+' из '+stepCount+'</dd>')+'</dl>';
     bBox.appendChild(card);
     var g=h('div','grid2');
     btn(g,'Скрыть доску',function(){S.hidden[S.sel]=true;S.sel=-1;renderBoard();syncUI();},'w');
@@ -568,18 +580,19 @@ function frame(now){
   stepTween(now);
   if(S.auto&&ptrCount()===0&&!tween)CAM.yaw+=dt*0.25;
   var k=1-Math.exp(-dt*7);S.explode+=(S.expT-S.explode)*k; if(Math.abs(S.expT-S.explode)<0.0005)S.explode=S.expT;
-  if(S.playing){S.stepF=(S.stepF==null?S.step:S.stepF)+dt*45*S.speed;var ns=Math.min(frameCount,Math.floor(S.stepF));if(ns!==S.step){S.step=ns;S.flash=order[Math.max(0,ns-1)]?order[Math.max(0,ns-1)].i:-1;S.flashT=now;if(ui.step){ui.step.value=S.step;ui.stepv.textContent=ui.stepf(S.step);}stepInfo();renderAll();}
-    if(S.step>=frameCount){S.playing=false;S.stepF=null;syncUI();}}
+  if(S.playing){S.stepF=(S.stepF==null?S.step:S.stepF)+dt*45*S.speed;var ns=Math.min(stepCount,Math.floor(S.stepF));if(ns!==S.step){S.step=ns;S.flash=order[Math.max(0,ns-1)]?order[Math.max(0,ns-1)].i:-1;S.flashT=now;if(ui.step){ui.step.value=S.step;ui.stepv.textContent=ui.stepf(S.step);}stepInfo();renderAll();}
+    if(S.step>=stepCount){S.playing=false;S.stepF=null;syncUI();}}
   else S.stepF=null;
   draw(now);
   requestAnimationFrame(frame);
 }
 resize(); goPreset('iso'); tween=null; CAM.yaw=0.78;CAM.pitch=0.5;CAM.dist=15;CAM.t=[0,3.2,0];
-syncUI();
+// при запуске: вращение и сборка по этапам от свай до отделки
+S.auto=true; startBuild();
 requestAnimationFrame(frame);
 setTimeout(function(){toast('Вращайте пальцем, щипком — масштаб, тап по доске — информация',4200);},500);
 // для проверки
-window.__v={setStage:setStage,STAGES:STAGES,S:S,M:M,select:doSelect,pick:pick,setExplode:setExplode,order:order,setView:setView,CAM:CAM,showAll:showAll};
+window.__v={startBuild:startBuild,setStage:setStage,STAGES:STAGES,S:S,M:M,select:doSelect,pick:pick,setExplode:setExplode,order:order,setView:setView,CAM:CAM,showAll:showAll};
 })();
 </script>
 </body>
